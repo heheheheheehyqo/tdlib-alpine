@@ -1,0 +1,109 @@
+name: Build and release TDLib
+
+on:
+  workflow_dispatch:
+    inputs:
+      tdlib_version:
+        description: 'TDLib version'
+        required: true
+      tdlib_commit:
+        description: 'TDLib commit'
+        required: true
+
+env:
+  TDLIB_VERSION: ${{ github.event.inputs.tdlib_version }}
+  TDLIB_COMMIT: ${{ github.event.inputs.tdlib_commit }}
+
+jobs:
+  build:
+    runs-on: [ self-hosted, tdlib ]
+    timeout-minutes: 1440
+    strategy:
+      matrix:
+        alpine: [ 3.17, 3.16 ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          build-args: |
+            "ALPINE_VERSION=${{ matrix.alpine }}"
+            "TDLIB_VERSION=${{ env.TDLIB_VERSION }}"
+            "TDLIB_COMMIT=${{ env.TDLIB_COMMIT }}"
+          outputs: type=local,dest=./output/${{ matrix.alpine}}
+
+      - run: |
+          mkdir -p ./build
+          
+          find ./output/${{ matrix.alpine }} -type f -print0 | while read -rd $'\0' file; do
+            dir=${file%/*}
+          
+            ls -la "$dir"
+            id
+          
+            if [[ "$dir" =~ \/[a-z]+_([a-zA-Z0-9_]+)\/(v[0-9]\.[0-9]\.[0-9])$ ]];
+            then
+              arch=${BASH_REMATCH[1]}
+              ver=${BASH_REMATCH[2]}
+            else
+              echo "$file"
+              exit 1
+            fi
+          
+            target="./build/${{ matrix.alpine}}-$arch.tar.gz"
+          
+            tar -czvf "$target" --directory="$dir" .
+          done
+      - uses: actions/upload-artifact@v3
+        with:
+          name: v${{ env.TDLIB_VERSION }}-${{ matrix.alpine }}
+          path: ./build/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: ./artifacts
+
+      - run: |
+          mkdir ./build
+          
+          find ./artifacts -type f -print0 | while read -rd $'\0' file; do
+            dir=${file%/*}
+            basename=${file##*/}
+            output="$dir/$basename-content"
+            
+            mkdir "$output"
+            
+            tar -xzf "$file" -C "$output"
+            rm "$file"
+            
+            sudo chown -R 0:0 "$output"
+            
+            target="./build/$basename"
+            
+            tar -czvf "$target" --directory="$output" .  
+          done
+
+      - name: Release
+        uses: softprops/action-gh-release@v0.1.15
+        with:
+          body: 'Source: https://github.com/tdlib/td/tree/${{ env.TDLIB_COMMIT }}'
+          tag_name: v${{ env.TDLIB_VERSION }}
+          files: |
+            ./build/*
