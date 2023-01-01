@@ -44,7 +44,8 @@ jobs:
             "TDLIB_COMMIT=${{ env.TDLIB_COMMIT }}"
           outputs: type=local,dest=./output/${{ matrix.alpine}}
 
-      - run: |
+      - name: Prepare artifact
+        run: |
           mkdir -p ./build
           
           find ./output/${{ matrix.alpine }} -type f -print0 | while read -rd $'\0' file; do
@@ -53,7 +54,7 @@ jobs:
             ls -la "$dir"
             id
           
-            if [[ "$dir" =~ \/[a-z]+_([a-zA-Z0-9_]+)\/(v[0-9]\.[0-9]\.[0-9])$ ]];
+            if [[ "$dir" =~ \/[a-z]+_([a-zA-Z0-9_]+)\/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]];
             then
               arch=${BASH_REMATCH[1]}
               ver=${BASH_REMATCH[2]}
